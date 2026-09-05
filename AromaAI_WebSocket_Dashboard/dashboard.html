@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AromaAI Live Dashboard</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #f4f7f5;
+    color: #1e2a23;
+}
+
+.header {
+    background: #176b4d;
+    color: white;
+    padding: 22px 30px;
+}
+
+.header h1 {
+    margin: 0 0 5px;
+}
+
+.header p {
+    margin: 0;
+    opacity: 0.9;
+}
+
+.container {
+    max-width: 1100px;
+    margin: 25px auto;
+    padding: 0 18px;
+}
+
+.status {
+    background: white;
+    padding: 16px 20px;
+    border-radius: 14px;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+    box-shadow: 0 5px 18px rgba(0,0,0,.06);
+}
+
+.online {
+    color: #16834d;
+    font-weight: bold;
+}
+
+.offline {
+    color: #c0392b;
+    font-weight: bold;
+}
+
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px;
+}
+
+.card {
+    background: white;
+    padding: 20px;
+    border-radius: 16px;
+    box-shadow: 0 5px 18px rgba(0,0,0,.06);
+}
+
+.label {
+    color: #718078;
+    font-size: 14px;
+    margin-bottom: 10px;
+}
+
+.value {
+    font-size: 31px;
+    font-weight: bold;
+}
+
+.unit {
+    font-size: 15px;
+    color: #718078;
+    margin-left: 4px;
+}
+
+.raw {
+    margin-top: 20px;
+    padding: 18px;
+    background: #15201b;
+    color: #d9f7e6;
+    border-radius: 14px;
+    overflow: auto;
+}
+
+pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.last-update {
+    margin-top: 18px;
+    color: #718078;
+    text-align: center;
+}
+</style>
+</head>
+
+<body>
+
+<header class="header">
+    <h1>🌿 AromaAI</h1>
+    <p>Real-Time Smart Drying Dashboard</p>
+</header>
+
+<main class="container">
+
+    <section class="status">
+        <div>
+            <strong>Device:</strong> DRYER_001
+        </div>
+
+        <div id="connection" class="offline">
+            ● Connecting...
+        </div>
+    </section>
+
+    <section class="grid">
+
+        <div class="card">
+            <div class="label">🌡 Temperature</div>
+            <div class="value">
+                <span id="temperature">--</span>
+                <span class="unit">°C</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">💧 Humidity</div>
+            <div class="value">
+                <span id="humidity">--</span>
+                <span class="unit">% RH</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">📏 Distance</div>
+            <div class="value">
+                <span id="distance">--</span>
+                <span class="unit">cm</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">🎛 Pot Raw</div>
+            <div class="value">
+                <span id="potRaw">--</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="label">⚡ Pot Voltage</div>
+            <div class="value">
+                <span id="potVolts">--</span>
+                <span class="unit">V</span>
+            </div>
+        </div>
+
+    </section>
+
+    <section class="raw">
+        <div style="margin-bottom:10px">
+            Latest MQTT data received by FastAPI
+        </div>
+
+        <pre id="rawData">{}</pre>
+    </section>
+
+    <div class="last-update">
+        Last update: <span id="time">--</span>
+    </div>
+
+</main>
+
+<script>
+let socket = null;
+let reconnectTimer = null;
+
+function setConnection(text, className) {
+    const element = document.getElementById("connection");
+    element.textContent = text;
+    element.className = className;
+}
+
+function updateDashboard(data) {
+
+    document.getElementById("temperature").textContent =
+        data.temperature ?? "--";
+
+    document.getElementById("humidity").textContent =
+        data.humidity ?? "--";
+
+    document.getElementById("distance").textContent =
+        data.distance_cm ?? "--";
+
+    document.getElementById("potRaw").textContent =
+        data.pot_raw ?? "--";
+
+    document.getElementById("potVolts").textContent =
+        data.pot_volts ?? "--";
+
+    document.getElementById("rawData").textContent =
+        JSON.stringify(data, null, 2);
+
+    document.getElementById("time").textContent =
+        new Date().toLocaleTimeString();
+}
+
+function connectWebSocket() {
+
+    // Automatically choose ws:// for HTTP and wss:// for HTTPS.
+    const protocol =
+        window.location.protocol === "https:" ? "wss:" : "ws:";
+
+    const host = window.location.hostname || "127.0.0.1";
+
+    socket = new WebSocket(
+        `${protocol}//${host}:8000/ws/sensors`
+    );
+
+    socket.onopen = function() {
+
+        console.log("✅ WebSocket connected");
+
+        setConnection(
+            "● Live WebSocket",
+            "online"
+        );
+    };
+
+    socket.onmessage = function(event) {
+
+        try {
+
+            const data = JSON.parse(event.data);
+
+            console.log("📩 Live sensor data:", data);
+
+            updateDashboard(data);
+
+        } catch (error) {
+
+            console.error(
+                "Invalid WebSocket JSON:",
+                error
+            );
+        }
+    };
+
+    socket.onerror = function(error) {
+
+        console.error(
+            "WebSocket error:",
+            error
+        );
+
+        setConnection(
+            "● Connection error",
+            "offline"
+        );
+    };
+
+    socket.onclose = function() {
+
+        console.log(
+            "WebSocket disconnected"
+        );
+
+        setConnection(
+            "● Disconnected",
+            "offline"
+        );
+
+        // Automatically reconnect.
+        clearTimeout(reconnectTimer);
+
+        reconnectTimer = setTimeout(
+            connectWebSocket,
+            2000
+        );
+    };
+}
+
+connectWebSocket();
+</script>
+
+</body>
+</html>
