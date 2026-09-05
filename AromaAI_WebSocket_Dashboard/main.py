@@ -313,6 +313,12 @@ async def sensor_websocket(websocket: WebSocket):
 
         while True:
             msg = await websocket.receive_text()
+            try:
+                msg_data = json.loads(msg)
+                if isinstance(msg_data, dict) and msg_data.get("action") == "publish_sample":
+                    publish_sample_mqtt()
+            except Exception:
+                pass
             if msg == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
 

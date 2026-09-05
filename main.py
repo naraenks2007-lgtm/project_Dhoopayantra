@@ -333,9 +333,13 @@ async def sensor_websocket(websocket: WebSocket):
             }))
 
         while True:
-            # Keep connection open and listen for ping/messages from frontend
             msg = await websocket.receive_text()
-            # Optional frontend-initiated sample publish request
+            try:
+                msg_data = json.loads(msg)
+                if isinstance(msg_data, dict) and msg_data.get("action") == "publish_sample":
+                    publish_sample_mqtt()
+            except Exception:
+                pass
             if msg == "ping":
                 await websocket.send_text(json.dumps({"type": "pong"}))
 
