@@ -178,13 +178,35 @@ async def startup_event():
 # REST ENDPOINT
 # ==========================================================
 
-@app.get("/")
-def home():
-    return {
-        "message": "AromaAI backend is running",
-        "mqtt_topic": MQTT_TOPIC,
-        "websocket": "/ws/sensors",
-    }
+import os
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+# Setup static files for React PWA
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+FRONTEND_DIST = os.path.join(BASE_DIR, "frontend", "dist")
+
+if os.path.exists(FRONTEND_DIST):
+    app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST, "assets")), name="assets")
+
+    @app.get("/")
+    async def serve_root():
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+
+    @app.get("/pwa/{full_path:path}")
+    async def serve_pwa(full_path: str):
+        file_path = os.path.join(FRONTEND_DIST, full_path)
+        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
+else:
+    @app.get("/")
+    def home():
+        return {
+            "message": "AromaAI backend is running",
+            "mqtt_topic": MQTT_TOPIC,
+            "websocket": "/ws/sensors",
+        }
 
 
 @app.get("/api/sensor/latest")

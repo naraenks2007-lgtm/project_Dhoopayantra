@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>AromaAI – Smart Drying & Live Telemetry</title>
+    
+    <!-- PWA & Mobile Web App Meta Tags -->
+    <meta name="theme-color" content="#1E5E3A" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AromaAI" />
+    <meta name="description" content="AI-powered platform for agarbatti drying, IoT live telemetry, quality inspection, and artisan empowerment." />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+
+    <!-- Google Fonts: Poppins (Regular 400, Medium 500, SemiBold 600, Bold 700) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script type="module" crossorigin src="/assets/index-DP35_w7b.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-2yE5Yi7t.css">
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Register Service Worker for PWA
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((reg) => console.log('✅ Service Worker registered:', reg.scope))
+            .catch((err) => console.log('❌ Service Worker registration failed:', err));
+        });
+      }
+    </script>
+  </body>
+</html>

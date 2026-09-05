@@ -1,0 +1,29 @@
+{
+  "short_name": "AromaAI",
+  "name": "AromaAI – Smart Drying & Live Tracking",
+  "description": "AI-powered smart agarbatti drying, IoT live telemetry, and quality assurance for artisan livelihoods.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#F9F6F0",
+  "theme_color": "#1E5E3A",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "categories": ["utilities", "productivity", "iot"]
+}

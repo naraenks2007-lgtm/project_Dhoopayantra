@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="128" fill="#1E5E3A"/>
+  <!-- Agarbatti incense smoke & leaf icon -->
+  <path d="M256 90 C 275 140, 230 180, 256 240 C 275 285, 240 320, 256 380" fill="none" stroke="#F5A623" stroke-width="20" stroke-linecap="round" stroke-dasharray="1 10"/>
+  <path d="M220 110 C 235 150, 205 180, 220 230" fill="none" stroke="#FAF7F2" stroke-width="12" stroke-linecap="round" opacity="0.6"/>
+  <path d="M290 120 C 310 165, 275 195, 290 245" fill="none" stroke="#FAF7F2" stroke-width="12" stroke-linecap="round" opacity="0.6"/>
+  <!-- Leaf element -->
+  <path d="M190 320 C 190 260, 250 250, 310 270 C 310 330, 250 340, 190 320 Z" fill="#27AE60"/>
+  <path d="M190 320 L 310 270" stroke="#1E5E3A" stroke-width="6"/>
+  <line x1="256" y1="380" x2="256" y2="440" stroke="#C49B71" stroke-width="14" stroke-linecap="round"/>
+</svg>
