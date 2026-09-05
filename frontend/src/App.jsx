@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import mqtt from 'mqtt';
 import HomeDashboard from './components/HomeDashboard';
 import DryingMonitor from './components/DryingMonitor';
 import AIPredictions from './components/AIPredictions';
@@ -24,9 +23,8 @@ export default function App() {
   const [isSimulating, setIsSimulating] = useState(false);
   const [period, setPeriod] = useState('day');
 
-  // WebSocket / MQTT Status
+  // WebSocket Status
   const [wsStatus, setWsStatus] = useState('connecting'); // 'online' | 'connecting' | 'offline'
-  const [mqttSource, setMqttSource] = useState('EMQX WebSocket'); // 'EMQX WebSocket' | 'FastAPI WS'
 
   // Live MQTT tracking state
   const [hasLiveMqtt, setHasLiveMqtt] = useState(false);
@@ -112,11 +110,11 @@ export default function App() {
     }
   });
 
-  const mqttClientRef = useRef(null);
-  const fastApiWsRef = useRef(null);
+  const socketRef = useRef(null);
+  const reconnectTimeoutRef = useRef(null);
 
-  // 1. Process incoming MQTT payload (from EMQX WebSocket or FastAPI WebSocket)
-  const processIncomingMqttData = (data, sourceName = 'EMQX WebSocket') => {
+  // Process incoming MQTT payload received via WebSocket from main.py
+  const processIncomingMqttData = (data) => {
     if (!data || typeof data !== 'object') return;
 
     const tempVal = data.temperature !== undefined ? parseFloat(data.temperature) : (data.temp !== undefined ? parseFloat(data.temp) : null);
@@ -143,7 +141,6 @@ export default function App() {
     setMqttPacketCount(c => c + 1);
     setLastMqttTime(new Date().toLocaleTimeString());
     setRawMqtt(data);
-    setMqttSource(sourceName);
     setWsStatus('online');
 
     setSensorData(prev => {
@@ -180,78 +177,26 @@ export default function App() {
     }
   };
 
-  // 2. Primary: Connect to EMQX MQTT Broker directly over WebSocket (wss://broker.emqx.io:8084/mqtt)
-  useEffect(() => {
-    if (isSimulating) return;
-
-    console.log('🔌 Connecting to EMQX MQTT Broker over WebSocket (wss://broker.emqx.io:8084/mqtt)...');
-    
-    // Connect via MQTT over WebSocket
-    const client = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
-      clientId: `aromaai-pwa-${Math.random().toString(16).substring(2, 8)}`,
-      clean: true,
-      connectTimeout: 8000,
-      reconnectPeriod: 3000,
-      keepalive: 60
-    });
-
-    mqttClientRef.current = client;
-
-    client.on('connect', () => {
-      console.log('✅ Direct EMQX WebSocket Connected! Subscribing to esp32/sensor_data...');
-      setWsStatus('online');
-      client.subscribe('esp32/sensor_data', (err) => {
-        if (!err) {
-          console.log('✅ Subscribed to topic: esp32/sensor_data over WebSocket');
-        } else {
-          console.error('Subscription error:', err);
-        }
-      });
-    });
-
-    client.on('message', (topic, message) => {
-      try {
-        const payloadStr = message.toString();
-        const payload = JSON.parse(payloadStr);
-        console.log(`📩 [EMQX WebSocket] Message on ${topic}:`, payload);
-        processIncomingMqttData(payload, 'EMQX WebSocket');
-      } catch (err) {
-        console.warn('MQTT JSON parse error:', err);
-      }
-    });
-
-    client.on('error', (err) => {
-      console.warn('EMQX WebSocket warning:', err);
-    });
-
-    client.on('offline', () => {
-      console.log('EMQX WebSocket offline, reconnecting...');
-    });
-
-    return () => {
-      if (client) client.end(true);
-    };
-  }, [isSimulating]);
-
-  // 3. Secondary: Connect to FastAPI WebSocket (ws://127.0.0.1:8000/ws/sensors) in main.py
+  // Connect to FastAPI WebSocket in main.py (ws://127.0.0.1:8000/ws/sensors)
   useEffect(() => {
     if (isSimulating) return;
 
     let isSubscribed = true;
-    let reconnectTimeout = null;
 
-    const connectFastApiWs = () => {
+    const connectWebSocket = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.hostname || '127.0.0.1';
       const wsUrl = `${protocol}//${host}:8000/ws/sensors`;
 
+      setWsStatus('connecting');
+
       try {
         const ws = new WebSocket(wsUrl);
-        fastApiWsRef.current = ws;
+        socketRef.current = ws;
 
         ws.onopen = () => {
           if (!isSubscribed) return;
-          console.log('✅ FastAPI WebSocket connected at', wsUrl);
+          console.log('✅ WebSocket Connected to main.py at', wsUrl);
           setWsStatus('online');
         };
 
@@ -259,63 +204,61 @@ export default function App() {
           if (!isSubscribed) return;
           try {
             const data = JSON.parse(event.data);
-            if (data.status !== 'connected_awaiting_mqtt') {
-              console.log('📩 [FastAPI WebSocket] Telemetry received:', data);
-              processIncomingMqttData(data, 'FastAPI WebSocket');
+            if (data.status === 'connected_awaiting_mqtt') {
+              console.log('🔌 Connected to main.py, awaiting first MQTT message...');
+              setRawMqtt(data);
+              return;
             }
+            console.log('📩 [WebSocket Telemetry received from main.py]:', data);
+            processIncomingMqttData(data);
           } catch (e) {
-            console.error('FastAPI WS parse error:', e);
+            console.error('WebSocket JSON parse error:', e);
+          }
+        };
+
+        ws.onerror = (err) => {
+          if (isSubscribed) {
+            console.warn('WebSocket error, retrying...', err);
+            setWsStatus('offline');
           }
         };
 
         ws.onclose = () => {
           if (isSubscribed) {
-            reconnectTimeout = setTimeout(connectFastApiWs, 4000);
+            setWsStatus('offline');
+            reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
           }
         };
       } catch (err) {
         if (isSubscribed) {
-          reconnectTimeout = setTimeout(connectFastApiWs, 4000);
+          setWsStatus('offline');
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
         }
       }
     };
 
-    connectFastApiWs();
+    connectWebSocket();
 
     return () => {
       isSubscribed = false;
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
-      if (fastApiWsRef.current) fastApiWsRef.current.close();
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (socketRef.current) socketRef.current.close();
     };
   }, [isSimulating]);
 
-  // 4. Publish Test MQTT Packet directly over WebSocket
+  // Publish Test MQTT Packet via WebSocket
   const handlePublishTestPacket = () => {
-    const samplePayload = {
-      temperature: parseFloat((39.2 + Math.random() * 2.2).toFixed(1)),
-      humidity: parseFloat((33.5 + Math.random() * 2.5).toFixed(1)),
-      distance_cm: parseFloat((14.2 + Math.random() * 0.8).toFixed(1)),
-      pot_raw: Math.floor(2750 + Math.random() * 150),
-      pot_volts: parseFloat((2.40 + Math.random() * 0.12).toFixed(2)),
-      device: "ESP32_DRYER_001"
-    };
-
-    const payloadStr = JSON.stringify(samplePayload);
-
-    // If EMQX WebSocket is connected, publish directly via MQTT over WebSocket!
-    if (mqttClientRef.current && mqttClientRef.current.connected) {
-      console.log('🚀 Publishing directly over EMQX WebSocket to esp32/sensor_data...');
-      mqttClientRef.current.publish('esp32/sensor_data', payloadStr, { qos: 1 });
-    } else if (fastApiWsRef.current && fastApiWsRef.current.readyState === WebSocket.OPEN) {
-      console.log('🚀 Requesting publish over FastAPI WebSocket...');
-      fastApiWsRef.current.send(JSON.stringify({ action: "publish_sample" }));
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      console.log('🚀 Sending publish_sample command to main.py over WebSocket...');
+      socketRef.current.send(JSON.stringify({ action: "publish_sample" }));
     } else {
-      // Fallback local injection
-      processIncomingMqttData(samplePayload, 'Local Telemetry');
+      console.warn('WebSocket not open. Falling back to HTTP trigger...');
+      const host = window.location.hostname || '127.0.0.1';
+      fetch(`http://${host}:8000/api/mqtt/publish-sample`, { method: 'POST' }).catch(() => {});
     }
   };
 
-  // 5. PWA Install handler
+  // PWA Install Prompt
   useEffect(() => {
     const handleBeforeInstall = (e) => {
       e.preventDefault();
@@ -334,7 +277,7 @@ export default function App() {
     setDeferredPrompt(null);
   };
 
-  // 6. Simulation loop when toggled
+  // Simulation Mode
   useEffect(() => {
     if (!isSimulating) return;
 
@@ -354,7 +297,7 @@ export default function App() {
         device: "ESP32_SIMULATOR"
       };
 
-      processIncomingMqttData(simData, 'Simulated Stream');
+      processIncomingMqttData(simData);
     }, 2000);
 
     return () => clearInterval(interval);
@@ -411,12 +354,12 @@ export default function App() {
               {wsStatus === 'online' ? (
                 <>
                   <Wifi size={12} />
-                  <span>{hasLiveMqtt ? `Live WebSocket (${mqttSource})` : 'WebSocket Connected'}</span>
+                  <span>{hasLiveMqtt ? 'Live WebSocket' : 'WebSocket Connected'}</span>
                 </>
               ) : (
                 <>
                   <WifiOff size={12} />
-                  <span>Connecting WebSocket...</span>
+                  <span>Backend Offline (Run main.py)</span>
                 </>
               )}
             </span>
