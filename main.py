@@ -1,9 +1,11 @@
 import asyncio
+from datetime import datetime
 import json
 import os
 import random
 import ssl
 import threading
+import time
 
 import paho.mqtt.client as mqtt
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -35,26 +37,105 @@ MQTT_PORT = 8084
 MQTT_TOPIC = "esp32/sensor_data"
 CLIENT_ID = f"aromaai-fastapi-{random.randint(1000, 9999)}"
 
-latest_sensor_data = {
-    "temperature": 39.4,
-    "humidity": 34.0,
-    "distance_cm": 14.5,
-    "pot_raw": 2840,
-    "pot_volts": 2.45,
-    "weight": 433,
-    "solarPower": 72,
-    "battery": 68,
-    "airflow": "Good",
-    "progress": 82,
-    "qualityScore": 91,
-    "startTime": "08:30 AM",
-    "elapsedTime": "1h 14m",
-    "estimatedTime": "24 min ± 4 min",
-    "batchId": "AGB-2026-0902-001"
+# Batch tracking
+BATCH_ID = "AGB-2026-0902-001"
+batch_start_dt = datetime.now()
+
+# Sensor data state (starts empty until first live MQTT message arrives)
+latest_sensor_data = {}
+mqtt_stats = {
+    "broker": MQTT_BROKER,
+    "topic": MQTT_TOPIC,
+    "connected": False,
+    "packet_count": 0,
+    "last_received": None
 }
 
-# Set of active browser WebSocket connections
+# Connected browser WebSocket clients
 websocket_clients = set()
+
+
+# ==========================================================
+# DRYING ESTIMATION & BRANCHES CALCULATION
+# ==========================================================
+
+def compute_drying_analytics(raw_data: dict) -> dict:
+    """
+    Enriches raw MQTT sensor data (temperature, humidity, distance, pot)
+    with the 5 required parameters:
+    1. temperature
+    2. humidity
+    3. number of branches dried (1 day, 1 week, 1 month)
+    4. estimated time to complete
+    5. start time
+    """
+    now = datetime.now()
+    temp = raw_data.get("temperature") or raw_data.get("temp")
+    hum = raw_data.get("humidity") or raw_data.get("hum")
+
+    # Start time
+    start_time_str = batch_start_dt.strftime("%I:%M %p")
+    elapsed_seconds = int((now - batch_start_dt).total_seconds())
+    elapsed_hrs = elapsed_seconds // 3600
+    elapsed_mins = (elapsed_seconds % 3600) // 60
+    elapsed_str = f"{elapsed_hrs}h {elapsed_mins}m" if elapsed_hrs > 0 else f"{elapsed_mins}m"
+
+    # Estimated time to complete calculation based on drying physics:
+    # Agarbatti target moisture is 8-10%. Lower humidity + higher temperature dries faster.
+    if temp is not None and hum is not None:
+        try:
+            t = float(temp)
+            h = float(hum)
+            # Baseline drying index
+            eta_mins = max(5, int(h * 0.7 - (t - 30) * 0.5))
+            estimated_time_str = f"{eta_mins} min ± 3 min"
+            # Progress calculation (from initial ~65% humidity to target ~30% chamber humidity)
+            progress_calc = max(10, min(98, int(100 - (h - 25) * 1.8)))
+            quality_calc = max(75, min(99, int(96 - abs(t - 39.5) * 2 - abs(h - 34) * 0.5)))
+        except (ValueError, TypeError):
+            estimated_time_str = "24 min ± 4 min"
+            progress_calc = 82
+            quality_calc = 91
+    else:
+        estimated_time_str = "24 min ± 4 min"
+        progress_calc = 82
+        quality_calc = 91
+
+    # Branches dried in 1 Day, 1 Week, 1 Month
+    # Default benchmark: ~20 branches per batch, 18 batches/day = 360 branches
+    branches_day = 360
+    branches_week = 2240
+    branches_month = 9600
+
+    enriched = {
+        **raw_data,
+        "temperature": temp,
+        "humidity": hum,
+        "batchId": BATCH_ID,
+        "startTime": start_time_str,
+        "elapsedTime": elapsed_str,
+        "estimatedTime": estimated_time_str,
+        "progress": progress_calc,
+        "qualityScore": quality_calc,
+        "branches_dried": {
+            "day": branches_day,
+            "week": branches_week,
+            "month": branches_month
+        },
+        "batches_dried": {
+            "day": 18,
+            "week": 112,
+            "month": 480
+        },
+        "mqtt_metadata": {
+            "topic": MQTT_TOPIC,
+            "broker": MQTT_BROKER,
+            "packet_num": mqtt_stats["packet_count"],
+            "received_at": now.strftime("%H:%M:%S"),
+            "raw_payload": raw_data
+        }
+    }
+    return enriched
 
 
 # ==========================================================
@@ -63,7 +144,7 @@ websocket_clients = set()
 
 def broadcast_sensor_data(data: dict):
     """
-    Push newest sensor data to all connected browser WebSockets.
+    Send newest enriched MQTT data to every connected browser WebSocket.
     """
     loop = broadcast_sensor_data.loop
     if loop is None or loop.is_closed():
@@ -95,32 +176,42 @@ broadcast_sensor_data.loop = None
 
 def on_connect(client, userdata, flags, reason_code, properties=None):
     if reason_code == 0:
-        print("✅ Connected to EMQX via secure WebSocket")
+        mqtt_stats["connected"] = True
+        print(f"✅ Connected to EMQX ({MQTT_BROKER}:{MQTT_PORT}) via secure WebSocket")
         client.subscribe(MQTT_TOPIC)
-        print(f"✅ Subscribed to: {MQTT_TOPIC}")
+        print(f"✅ Subscribed to MQTT Topic: {MQTT_TOPIC}")
     else:
-        print("❌ MQTT connection failed:", reason_code)
+        mqtt_stats["connected"] = False
+        print("❌ MQTT connection failed with reason code:", reason_code)
 
 
 def on_message(client, userdata, msg):
-    global latest_sensor_data
+    global latest_sensor_data, mqtt_stats
 
     try:
-        message = msg.payload.decode("utf-8")
-        data = json.loads(message)
+        raw_payload = msg.payload.decode("utf-8")
+        data = json.loads(raw_payload)
 
         if not isinstance(data, dict):
+            print("⚠️ MQTT message is not a JSON object:", raw_payload)
             return
 
-        latest_sensor_data.update(data)
-        print("\n📩 New MQTT Sensor Data received:")
-        print(data)
+        mqtt_stats["packet_count"] += 1
+        mqtt_stats["last_received"] = datetime.now().strftime("%H:%M:%S")
 
-        # Broadcast immediately to React PWA clients
+        print(f"\n📩 [MQTT #{mqtt_stats['packet_count']}] Received on '{msg.topic}':")
+        print(json.dumps(data, indent=2))
+
+        # Enrich with the 5 dashboard parameters and telemetry
+        latest_sensor_data = compute_drying_analytics(data)
+
+        # Broadcast live to React dashboard via WebSocket
         broadcast_sensor_data(latest_sensor_data)
 
+    except json.JSONDecodeError:
+        print("❌ Invalid JSON in MQTT payload:", msg.payload)
     except Exception as e:
-        print("MQTT processing error:", e)
+        print("❌ Error processing MQTT message:", e)
 
 
 # ==========================================================
@@ -149,34 +240,71 @@ async def startup_event():
     broadcast_sensor_data.loop = asyncio.get_running_loop()
 
     def start_mqtt():
-        print(f"Connecting to MQTT Broker {MQTT_BROKER}:{MQTT_PORT}...")
+        print(f"Connecting to EMQX MQTT Broker {MQTT_BROKER}:{MQTT_PORT}...")
         try:
             mqtt_client.connect(MQTT_BROKER, MQTT_PORT, 60)
             mqtt_client.loop_forever()
         except Exception as err:
-            print("MQTT connect warning:", err)
+            print("MQTT connection loop error:", err)
 
     threading.Thread(target=start_mqtt, daemon=True).start()
 
 
 # ==========================================================
-# API ENDPOINTS
+# REST API ENDPOINTS
 # ==========================================================
 
 @app.get("/api/health")
 def health_check():
     return {
         "status": "online",
-        "service": "AromaAI Backend & PWA Server",
-        "mqtt_topic": MQTT_TOPIC,
-        "websocket": "/ws/sensors",
-        "connected_ws_clients": len(websocket_clients)
+        "service": "AromaAI Backend & Telemetry Server",
+        "mqtt_status": mqtt_stats,
+        "active_websockets": len(websocket_clients),
+        "has_live_data": bool(latest_sensor_data)
     }
 
 
 @app.get("/api/sensor/latest")
 def get_latest_sensor():
+    """
+    Returns latest sensor data enriched from MQTT.
+    """
+    if not latest_sensor_data:
+        return {
+            "status": "waiting_for_mqtt",
+            "message": f"Listening to MQTT topic '{MQTT_TOPIC}' on {MQTT_BROKER}...",
+            "mqtt_stats": mqtt_stats
+        }
     return latest_sensor_data
+
+
+@app.post("/api/mqtt/publish-sample")
+@app.get("/api/mqtt/publish-sample")
+def publish_sample_mqtt():
+    """
+    Utility endpoint to publish a sample ESP32 payload directly to broker.emqx.io
+    on 'esp32/sensor_data' to test live MQTT ingestion end-to-end.
+    """
+    sample_payload = {
+        "temperature": round(random.uniform(38.2, 41.5), 1),
+        "humidity": round(random.uniform(32.0, 36.5), 1),
+        "distance_cm": round(random.uniform(13.5, 15.5), 1),
+        "pot_raw": random.randint(2700, 2950),
+        "pot_volts": round(random.uniform(2.30, 2.55), 2),
+        "device": "ESP32_DRYER_001"
+    }
+
+    payload_str = json.dumps(sample_payload)
+    info = mqtt_client.publish(MQTT_TOPIC, payload_str, qos=1)
+    info.wait_for_publish(timeout=3)
+
+    return {
+        "success": True,
+        "published_to": MQTT_TOPIC,
+        "broker": MQTT_BROKER,
+        "payload": sample_payload
+    }
 
 
 # ==========================================================
@@ -187,16 +315,29 @@ def get_latest_sensor():
 async def sensor_websocket(websocket: WebSocket):
     await websocket.accept()
     websocket_clients.add(websocket)
-    print(f"🔌 Browser WebSocket connected. Total clients: {len(websocket_clients)}")
+    print(f"🔌 React Dashboard connected via WebSocket. Total clients: {len(websocket_clients)}")
 
     try:
-        # Immediately send current state
+        # If we already have live data from MQTT, send it immediately upon connection
         if latest_sensor_data:
             await websocket.send_text(json.dumps(latest_sensor_data))
+        else:
+            # Let the dashboard know we are connected to the backend and awaiting MQTT
+            await websocket.send_text(json.dumps({
+                "status": "connected_awaiting_mqtt",
+                "message": f"Connected to backend. Waiting for MQTT messages on '{MQTT_TOPIC}'...",
+                "mqtt_broker": MQTT_BROKER,
+                "mqtt_topic": MQTT_TOPIC,
+                "batchId": BATCH_ID,
+                "startTime": batch_start_dt.strftime("%I:%M %p")
+            }))
 
         while True:
-            # Keep-alive receive
-            await websocket.receive_text()
+            # Keep connection open and listen for ping/messages from frontend
+            msg = await websocket.receive_text()
+            # Optional frontend-initiated sample publish request
+            if msg == "ping":
+                await websocket.send_text(json.dumps({"type": "pong"}))
 
     except WebSocketDisconnect:
         pass
@@ -204,7 +345,7 @@ async def sensor_websocket(websocket: WebSocket):
         print("WebSocket client error:", e)
     finally:
         websocket_clients.discard(websocket)
-        print(f"🔌 Browser WebSocket disconnected. Remaining: {len(websocket_clients)}")
+        print(f"🔌 React Dashboard disconnected. Remaining clients: {len(websocket_clients)}")
 
 
 # ==========================================================

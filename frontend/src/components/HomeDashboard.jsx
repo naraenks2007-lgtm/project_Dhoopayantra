@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Thermometer, 
   Droplets, 
@@ -9,7 +9,12 @@ import {
   Wind, 
   Sparkles,
   CheckCircle2,
-  Calendar
+  Calendar,
+  Radio,
+  Send,
+  ChevronDown,
+  ChevronUp,
+  Cpu
 } from 'lucide-react';
 
 export default function HomeDashboard({ 
@@ -17,11 +22,24 @@ export default function HomeDashboard({
   period, 
   setPeriod, 
   batchStats,
+  rawMqtt,
+  mqttPacketCount,
+  lastMqttTime,
+  hasLiveMqtt,
+  onPublishTestPacket,
   onNavigateToMonitor,
   onStartPackaging
 }) {
-  const temperature = sensorData.temperature !== undefined ? Number(sensorData.temperature).toFixed(1) : "39.4";
-  const humidity = sensorData.humidity !== undefined ? Number(sensorData.humidity).toFixed(1) : "34.0";
+  const [showRawMqtt, setShowRawMqtt] = useState(true);
+
+  // Format values safely
+  const formatValue = (val, decimals = 1) => {
+    if (val === null || val === undefined || isNaN(Number(val))) return "--";
+    return Number(val).toFixed(decimals);
+  };
+
+  const temperature = formatValue(sensorData.temperature, 1);
+  const humidity = formatValue(sensorData.humidity, 1);
   const weight = sensorData.weight !== undefined ? sensorData.weight : 433;
   const solarPower = sensorData.solarPower !== undefined ? sensorData.solarPower : 72;
   const battery = sensorData.battery !== undefined ? sensorData.battery : 68;
@@ -39,7 +57,7 @@ export default function HomeDashboard({
   // Circular gauge calculations
   const radius = 42;
   const circumference = 2 * Math.PI * radius;
-  const strokeDashoffset = circumference - (progressPercent / 100) * circumference;
+  const strokeDashoffset = circumference - ((hasLiveMqtt ? progressPercent : 0) / 100) * circumference;
 
   return (
     <div className="home-dashboard-view">
@@ -50,7 +68,6 @@ export default function HomeDashboard({
           <p>Good morning! Smart drying system active.</p>
         </div>
         <div className="artisan-avatar-wrap" title="Meena - Lead Artisan">
-          {/* Stylized Artisan Avatar */}
           <svg viewBox="0 0 40 40" width="40" height="40">
             <circle cx="20" cy="20" r="20" fill="#E8F3EC" />
             <circle cx="20" cy="15" r="7" fill="#1E5E3A" />
@@ -60,15 +77,20 @@ export default function HomeDashboard({
         </div>
       </div>
 
-      {/* Batch Status Banner */}
+      {/* Batch Status Banner with Live MQTT indicator */}
       <div className="batch-status-banner">
         <div className="batch-info-left">
           <span className="batch-label">Current Batch</span>
           <span className="batch-id">{currentBatchId}</span>
         </div>
-        <div className="batch-status-badge">
-          <span className="pulse-dot"></span>
-          <span>Drying In Progress</span>
+        <div className="batch-status-badge" style={{
+          background: hasLiveMqtt ? 'var(--emerald-subtle)' : '#fff3cd',
+          color: hasLiveMqtt ? 'var(--primary)' : '#856404'
+        }}>
+          <span className="pulse-dot" style={{
+            background: hasLiveMqtt ? 'var(--emerald)' : '#e67e22'
+          }}></span>
+          <span>{hasLiveMqtt ? `MQTT Live (${mqttPacketCount} pkts)` : 'Listening esp32/sensor_data'}</span>
         </div>
       </div>
 
@@ -81,7 +103,9 @@ export default function HomeDashboard({
             <div className="metric-icon-wrap temp">
               <Thermometer size={18} />
             </div>
-            <span className="metric-badge badge-optimal">Optimal</span>
+            <span className={`metric-badge ${hasLiveMqtt ? 'badge-optimal' : 'badge-live'}`}>
+              {hasLiveMqtt ? 'MQTT Live' : 'Waiting...'}
+            </span>
           </div>
           <div>
             <div className="metric-label">1. Temperature</div>
@@ -101,7 +125,9 @@ export default function HomeDashboard({
             <div className="metric-icon-wrap humidity">
               <Droplets size={18} />
             </div>
-            <span className="metric-badge badge-optimal">Controlled</span>
+            <span className={`metric-badge ${hasLiveMqtt ? 'badge-optimal' : 'badge-live'}`}>
+              {hasLiveMqtt ? 'Controlled' : 'Waiting...'}
+            </span>
           </div>
           <div>
             <div className="metric-label">2. Humidity</div>
@@ -121,16 +147,16 @@ export default function HomeDashboard({
             <div className="metric-icon-wrap time">
               <Clock size={18} />
             </div>
-            <span className="metric-badge badge-live">AI Predicted</span>
+            <span className="metric-badge badge-live">AI Physics</span>
           </div>
           <div>
             <div className="metric-label">4. Est. Completion</div>
             <div className="metric-value-row">
-              <span className="metric-value" style={{ fontSize: '19px' }}>{estimatedTime}</span>
+              <span className="metric-value" style={{ fontSize: '18px' }}>{estimatedTime}</span>
             </div>
           </div>
           <div className="metric-footer-note">
-            ~14 mins remaining
+            Target 8-10% moisture
           </div>
         </div>
 
@@ -149,7 +175,7 @@ export default function HomeDashboard({
             </div>
           </div>
           <div className="metric-footer-note">
-            Batch began this morning
+            Session active
           </div>
         </div>
 
@@ -214,22 +240,22 @@ export default function HomeDashboard({
         </div>
       </div>
 
-      {/* Secondary Sensor Strip (Weight, Solar, Battery, Airflow) */}
+      {/* Secondary Sensor Strip (Distance, Pot Raw, Pot Volts, Airflow) from MQTT */}
       <div className="sensor-strip-card">
         <div className="sensor-strip-item">
-          <span className="sensor-strip-label">Weight</span>
-          <span className="sensor-strip-val">{weight} g</span>
-          <span className="sensor-strip-status">-12g/hr</span>
+          <span className="sensor-strip-label">Distance</span>
+          <span className="sensor-strip-val">{sensorData.distance_cm ?? "--"} cm</span>
+          <span className="sensor-strip-status">Ultrasonic</span>
         </div>
         <div className="sensor-strip-item">
-          <span className="sensor-strip-label">Solar Power</span>
-          <span className="sensor-strip-val">{solarPower}%</span>
-          <span className="sensor-strip-status" style={{ color: '#E07A5F' }}>Active</span>
+          <span className="sensor-strip-label">Pot Raw</span>
+          <span className="sensor-strip-val">{sensorData.pot_raw ?? "--"}</span>
+          <span className="sensor-strip-status" style={{ color: '#E07A5F' }}>ADC</span>
         </div>
         <div className="sensor-strip-item">
-          <span className="sensor-strip-label">Battery</span>
-          <span className="sensor-strip-val">{battery}%</span>
-          <span className="sensor-strip-status">Healthy</span>
+          <span className="sensor-strip-label">Pot Voltage</span>
+          <span className="sensor-strip-val">{sensorData.pot_volts ?? "--"} V</span>
+          <span className="sensor-strip-status">Level</span>
         </div>
         <div className="sensor-strip-item">
           <span className="sensor-strip-label">Airflow</span>
@@ -267,8 +293,8 @@ export default function HomeDashboard({
               />
             </svg>
             <div className="progress-ring-text">
-              <span className="progress-ring-val">{progressPercent}%</span>
-              <span className="progress-ring-sub">Near dry</span>
+              <span className="progress-ring-val">{hasLiveMqtt ? `${progressPercent}%` : "--"}</span>
+              <span className="progress-ring-sub">{hasLiveMqtt ? "Chamber drying" : "Waiting MQTT"}</span>
             </div>
           </div>
         </div>
@@ -291,15 +317,103 @@ export default function HomeDashboard({
                 stroke="var(--emerald)"
                 strokeWidth="10"
                 strokeDasharray="125.6"
-                strokeDashoffset={125.6 - (qualityScore / 100) * 125.6}
+                strokeDashoffset={125.6 - ((hasLiveMqtt ? qualityScore : 0) / 100) * 125.6}
                 strokeLinecap="round"
                 style={{ transition: 'stroke-dashoffset 0.8s ease' }}
               />
             </svg>
-            <span className="quality-score-val">{qualityScore}/100</span>
-            <span className="quality-score-rating">Excellent Quality</span>
+            <span className="quality-score-val">{hasLiveMqtt ? `${qualityScore}/100` : "--"}</span>
+            <span className="quality-score-rating">{hasLiveMqtt ? "Excellent Quality" : "Pending sensor"}</span>
           </div>
         </div>
+      </div>
+
+      {/* LIVE MQTT TELEMETRY INSPECTOR (Exact live JSON stream from main.py) */}
+      <div style={{
+        background: '#15201b',
+        color: '#d9f7e6',
+        borderRadius: '16px',
+        padding: '14px 16px',
+        marginBottom: '16px',
+        boxShadow: 'var(--shadow-sm)',
+        border: '1px solid rgba(39, 174, 96, 0.25)'
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Radio size={16} color="var(--emerald)" className={hasLiveMqtt ? "pulse-dot" : ""} />
+            <strong style={{ fontSize: '12.5px', color: '#f0fdf4' }}>
+              📡 Live MQTT Payload (from main.py)
+            </strong>
+          </div>
+          <button
+            onClick={() => setShowRawMqtt(!showRawMqtt)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: '#94a3b8',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px'
+            }}
+          >
+            {showRawMqtt ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            <span>{showRawMqtt ? 'Collapse' : 'Expand'}</span>
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#86efac', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+          <span>Topic: <code>esp32/sensor_data</code></span>
+          <span>Packets: <strong>{mqttPacketCount}</strong></span>
+          <span>Last: <strong>{lastMqttTime || '--'}</strong></span>
+        </div>
+
+        {showRawMqtt && (
+          <>
+            <pre style={{
+              margin: 0,
+              padding: '10px',
+              background: '#0d1511',
+              borderRadius: '8px',
+              fontSize: '11px',
+              color: '#86efac',
+              fontFamily: 'monospace',
+              maxHeight: '160px',
+              overflowY: 'auto',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word'
+            }}>
+              {rawMqtt ? JSON.stringify(rawMqtt, null, 2) : "// Waiting for incoming MQTT messages on 'esp32/sensor_data'..."}
+            </pre>
+
+            <div style={{ marginTop: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ fontSize: '10.5px', color: '#94a3b8' }}>
+                Broker: <code>broker.emqx.io:8084</code>
+              </span>
+              <button
+                onClick={onPublishTestPacket}
+                style={{
+                  background: 'var(--primary-light)',
+                  color: 'white',
+                  border: 'none',
+                  padding: '5px 12px',
+                  borderRadius: '16px',
+                  fontSize: '11px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+                title="Publish a sample MQTT packet to broker.emqx.io to verify live flow"
+              >
+                <Send size={12} />
+                <span>Publish Test MQTT</span>
+              </button>
+            </div>
+          </>
+        )}
       </div>
 
       {/* AI Insight banner */}
@@ -310,8 +424,9 @@ export default function HomeDashboard({
         <div className="ai-insight-text">
           <h4>AI Insight & Guidance</h4>
           <p>
-            Drying is proceeding normally. Estimated completion in 14 minutes.
-            Aroma preservation index is at 98%.
+            {hasLiveMqtt 
+              ? `Chamber telemetry is streaming live from MQTT. Temperature is at ${temperature}°C with ${humidity}% humidity.`
+              : "Backend is connected. Listening to MQTT broker on topic esp32/sensor_data. Values will update live upon message arrival."}
           </p>
         </div>
       </div>

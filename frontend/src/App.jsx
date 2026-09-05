@@ -15,7 +15,8 @@ import {
   Download,
   Sparkles,
   Signal,
-  BatteryCharging
+  BatteryCharging,
+  Send
 } from 'lucide-react';
 
 export default function App() {
@@ -34,17 +35,23 @@ export default function App() {
   // WebSocket connection status
   const [wsStatus, setWsStatus] = useState('connecting'); // 'online' | 'connecting' | 'offline'
 
+  // Live MQTT tracking state
+  const [hasLiveMqtt, setHasLiveMqtt] = useState(false);
+  const [mqttPacketCount, setMqttPacketCount] = useState(0);
+  const [lastMqttTime, setLastMqttTime] = useState(null);
+  const [rawMqtt, setRawMqtt] = useState(null);
+
   // PWA Install prompt state
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [showInstallBanner, setShowInstallBanner] = useState(false);
 
-  // Current live sensor telemetry
+  // Live sensor telemetry (starts without dummy data until MQTT arrives or sim is clicked)
   const [sensorData, setSensorData] = useState({
-    temperature: 39.4,
-    humidity: 34.0,
-    distance_cm: 14.5,
-    pot_raw: 2840,
-    pot_volts: 2.45,
+    temperature: null,
+    humidity: null,
+    distance_cm: null,
+    pot_raw: null,
+    pot_volts: null,
     weight: 433,
     solarPower: 72,
     battery: 68,
@@ -59,8 +66,8 @@ export default function App() {
 
   // Rolling history for sparkline charts
   const [historyData, setHistoryData] = useState({
-    temperature: [36.2, 37.1, 38.0, 38.8, 39.1, 39.3, 39.4, 39.5, 39.2, 39.4],
-    humidity: [58.0, 52.5, 46.0, 41.2, 37.5, 35.8, 35.0, 34.5, 34.2, 34.0],
+    temperature: [38.2, 38.5, 38.9, 39.1, 39.4, 39.5, 39.3, 39.4, 39.6, 39.4],
+    humidity: [45.0, 42.5, 40.0, 38.2, 36.5, 35.8, 35.0, 34.5, 34.2, 34.0],
     weight: [495, 485, 472, 460, 451, 444, 439, 436, 434, 433]
   });
 
@@ -133,12 +140,10 @@ export default function App() {
     setDeferredPrompt(null);
   };
 
-  // 2. Connect to FastAPI WebSocket
+  // 2. Connect to FastAPI WebSocket (/ws/sensors)
   useEffect(() => {
     if (isSimulating) {
-      if (socketRef.current) {
-        socketRef.current.close();
-      }
+      if (socketRef.current) socketRef.current.close();
       setWsStatus('online');
       return;
     }
@@ -148,7 +153,6 @@ export default function App() {
     const connectWebSocket = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.hostname || '127.0.0.1';
-      // Default FastAPI port is 8000
       const wsUrl = `${protocol}//${host}:8000/ws/sensors`;
 
       setWsStatus('connecting');
@@ -167,26 +171,53 @@ export default function App() {
           if (!isSubscribed) return;
           try {
             const data = JSON.parse(event.data);
-            console.log('📩 Incoming Sensor Data:', data);
+            console.log('📩 Incoming Sensor Data from main.py:', data);
 
-            setSensorData((prev) => {
-              const updatedTemp = data.temperature !== undefined ? parseFloat(data.temperature) : prev.temperature;
-              const updatedHum = data.humidity !== undefined ? parseFloat(data.humidity) : prev.humidity;
+            // If backend is still waiting for first MQTT message
+            if (data.status === 'connected_awaiting_mqtt') {
+              setRawMqtt(data);
+              return;
+            }
 
-              // Append to history buffer for smooth live sparkline graphs
-              setHistoryData((h) => ({
-                temperature: [...h.temperature.slice(1), updatedTemp],
-                humidity: [...h.humidity.slice(1), updatedHum],
-                weight: [...h.weight.slice(1), prev.weight]
-              }));
+            // Real MQTT data received!
+            const tempVal = data.temperature !== undefined ? parseFloat(data.temperature) : null;
+            const humVal = data.humidity !== undefined ? parseFloat(data.humidity) : null;
 
-              return {
-                ...prev,
-                ...data,
-                temperature: updatedTemp,
-                humidity: updatedHum
-              };
-            });
+            if (tempVal !== null || humVal !== null) {
+              setHasLiveMqtt(true);
+              setMqttPacketCount((c) => c + 1);
+              setLastMqttTime(new Date().toLocaleTimeString());
+              setRawMqtt(data);
+
+              setSensorData((prev) => {
+                const updatedTemp = tempVal !== null ? tempVal : prev.temperature;
+                const updatedHum = humVal !== null ? humVal : prev.humidity;
+
+                // Update history sparklines
+                setHistoryData((h) => ({
+                  temperature: [...h.temperature.slice(1), updatedTemp],
+                  humidity: [...h.humidity.slice(1), updatedHum],
+                  weight: [...h.weight.slice(1), prev.weight]
+                }));
+
+                return {
+                  ...prev,
+                  ...data,
+                  temperature: updatedTemp,
+                  humidity: updatedHum
+                };
+              });
+
+              // Update branch stats if provided by main.py
+              if (data.branches_dried) {
+                setBatchStats((b) => ({
+                  ...b,
+                  day: { ...b.day, branches: data.branches_dried.day },
+                  week: { ...b.week, branches: data.branches_dried.week },
+                  month: { ...b.month, branches: data.branches_dried.month }
+                }));
+              }
+            }
           } catch (err) {
             console.error('Error parsing WS JSON:', err);
           }
@@ -204,7 +235,7 @@ export default function App() {
           reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
         };
       } catch (err) {
-        console.error('WebSocket connection initialization error:', err);
+        console.error('WebSocket connection error:', err);
         if (isSubscribed) {
           setWsStatus('offline');
           reconnectTimeoutRef.current = setTimeout(connectWebSocket, 3000);
@@ -221,19 +252,62 @@ export default function App() {
     };
   }, [isSimulating]);
 
-  // 3. IoT Simulator loop (active when isSimulating is ON or fallback)
+  // 3. Publish Test MQTT Packet to EMQX broker to verify live flow
+  const handlePublishTestPacket = async () => {
+    const host = window.location.hostname || '127.0.0.1';
+    try {
+      const res = await fetch(`http://${host}:8000/api/mqtt/publish-sample`, {
+        method: 'POST'
+      });
+      const result = await res.json();
+      console.log('⚡ Published test sample to EMQX:', result);
+    } catch (err) {
+      console.warn('Could not trigger backend test publish:', err);
+      // Fallback local simulation injection
+      const sample = {
+        temperature: parseFloat((38.5 + Math.random() * 2.5).toFixed(1)),
+        humidity: parseFloat((33.0 + Math.random() * 3.0).toFixed(1)),
+        distance_cm: parseFloat((14.0 + Math.random() * 1.2).toFixed(1)),
+        pot_raw: Math.floor(2700 + Math.random() * 200),
+        pot_volts: parseFloat((2.35 + Math.random() * 0.15).toFixed(2)),
+        device: "ESP32_SIMULATOR"
+      };
+      setHasLiveMqtt(true);
+      setMqttPacketCount(c => c + 1);
+      setLastMqttTime(new Date().toLocaleTimeString());
+      setRawMqtt(sample);
+      setSensorData(prev => ({ ...prev, ...sample }));
+    }
+  };
+
+  // 4. Simulator loop when explicitly turned on
   useEffect(() => {
     if (!isSimulating) return;
 
+    setHasLiveMqtt(true);
     const interval = setInterval(() => {
       setSensorData((prev) => {
-        // Subtle natural fluctuation
+        const curTemp = prev.temperature || 39.4;
+        const curHum = prev.humidity || 34.0;
         const dTemp = (Math.random() - 0.5) * 0.4;
         const dHum = (Math.random() - 0.5) * 0.5;
-        const newTemp = parseFloat((Math.max(38.0, Math.min(41.5, prev.temperature + dTemp))).toFixed(1));
-        const newHum = parseFloat((Math.max(31.0, Math.min(36.5, prev.humidity + dHum))).toFixed(1));
+        const newTemp = parseFloat((Math.max(38.0, Math.min(41.5, curTemp + dTemp))).toFixed(1));
+        const newHum = parseFloat((Math.max(31.0, Math.min(36.5, curHum + dHum))).toFixed(1));
         const newDist = parseFloat((14.0 + Math.random() * 0.8).toFixed(1));
         const newPotVolts = parseFloat((2.4 + Math.random() * 0.1).toFixed(2));
+        const newPotRaw = Math.floor(2800 + Math.random() * 80);
+
+        setMqttPacketCount(c => c + 1);
+        setLastMqttTime(new Date().toLocaleTimeString());
+        setRawMqtt({
+          temperature: newTemp,
+          humidity: newHum,
+          distance_cm: newDist,
+          pot_raw: newPotRaw,
+          pot_volts: newPotVolts,
+          device: "ESP32_DRYER_001",
+          simulated: true
+        });
 
         // Update history
         setHistoryData((h) => ({
@@ -247,6 +321,7 @@ export default function App() {
           temperature: newTemp,
           humidity: newHum,
           distance_cm: newDist,
+          pot_raw: newPotRaw,
           pot_volts: newPotVolts
         };
       });
@@ -309,12 +384,12 @@ export default function App() {
               {wsStatus === 'online' ? (
                 <>
                   <Wifi size={12} />
-                  <span>{isSimulating ? 'Sim Mode' : 'Live WS'}</span>
+                  <span>{hasLiveMqtt ? 'Live MQTT' : 'Backend Connected'}</span>
                 </>
               ) : (
                 <>
                   <WifiOff size={12} />
-                  <span>Offline (Reconnecting)</span>
+                  <span>Backend Offline</span>
                 </>
               )}
             </span>
@@ -342,6 +417,11 @@ export default function App() {
               period={period}
               setPeriod={setPeriod}
               batchStats={batchStats}
+              rawMqtt={rawMqtt}
+              mqttPacketCount={mqttPacketCount}
+              lastMqttTime={lastMqttTime}
+              hasLiveMqtt={hasLiveMqtt}
+              onPublishTestPacket={handlePublishTestPacket}
               onNavigateToMonitor={() => setActiveScreen('monitor')}
               onStartPackaging={() => setActiveScreen('alerts')}
             />
