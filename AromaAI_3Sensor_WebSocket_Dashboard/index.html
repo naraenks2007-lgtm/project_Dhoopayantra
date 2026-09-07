@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+
+<html lang="en">
+
+<head>
+
+<meta charset="UTF-8">
+
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
+
+<title>AromaAI Live Sensor Dashboard</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+
+    margin: 0;
+
+    font-family: Arial, sans-serif;
+
+    background: #f4f7f5;
+
+    color: #17231d;
+}
+
+
+header {
+
+    background: #176b4d;
+
+    color: white;
+
+    padding: 24px;
+
+}
+
+
+header h1 {
+
+    margin: 0;
+
+    font-size: 28px;
+
+}
+
+
+header p {
+
+    margin: 5px 0 0;
+
+    opacity: 0.9;
+
+}
+
+
+.container {
+
+    max-width: 900px;
+
+    margin: 30px auto;
+
+    padding: 0 20px;
+
+}
+
+
+.status-bar {
+
+    background: white;
+
+    padding: 18px 22px;
+
+    border-radius: 14px;
+
+    display: flex;
+
+    justify-content: space-between;
+
+    align-items: center;
+
+    margin-bottom: 20px;
+
+    box-shadow: 0 5px 18px rgba(0,0,0,0.06);
+
+}
+
+
+.online {
+
+    color: #16834d;
+
+    font-weight: bold;
+
+}
+
+
+.offline {
+
+    color: #c0392b;
+
+    font-weight: bold;
+
+}
+
+
+.grid {
+
+    display: grid;
+
+    grid-template-columns:
+        repeat(2, 1fr);
+
+    gap: 20px;
+
+}
+
+
+.card {
+
+    background: white;
+
+    padding: 30px;
+
+    border-radius: 18px;
+
+    box-shadow: 0 5px 18px rgba(0,0,0,0.06);
+
+}
+
+
+.icon {
+
+    font-size: 32px;
+
+}
+
+
+.label {
+
+    color: #718078;
+
+    margin-top: 10px;
+
+    font-size: 15px;
+
+}
+
+
+.value {
+
+    font-size: 42px;
+
+    font-weight: bold;
+
+    margin-top: 10px;
+
+}
+
+
+.unit {
+
+    font-size: 17px;
+
+    color: #718078;
+
+}
+
+
+.raw {
+
+    margin-top: 20px;
+
+    padding: 18px;
+
+    background: #14201a;
+
+    color: #d9f7e6;
+
+    border-radius: 14px;
+
+    overflow-x: auto;
+
+}
+
+
+pre {
+
+    margin: 0;
+
+    white-space: pre-wrap;
+
+}
+
+
+.last-update {
+
+    text-align: center;
+
+    color: #718078;
+
+    margin-top: 18px;
+
+}
+
+
+@media (max-width: 650px) {
+
+    .grid {
+
+        grid-template-columns: 1fr;
+
+    }
+
+    .status-bar {
+
+        flex-direction: column;
+
+        align-items: flex-start;
+
+        gap: 10px;
+
+    }
+
+}
+
+</style>
+
+</head>
+
+
+<body>
+
+
+<header>
+
+    <h1>🌿 AromaAI</h1>
+
+    <p>Live Smart Dryer Monitoring</p>
+
+</header>
+
+
+<div class="container">
+
+
+    <div class="status-bar">
+
+        <div>
+
+            <strong>Device:</strong>
+            ESP32_DRYER_001
+
+        </div>
+
+        <div
+            id="connection"
+            class="offline"
+        >
+
+            ● Connecting...
+
+        </div>
+
+    </div>
+
+
+    <div class="grid">
+
+
+        <!-- ULTRASONIC -->
+
+        <div class="card">
+
+            <div class="icon">
+                📏
+            </div>
+
+            <div class="label">
+                Ultrasonic Distance
+            </div>
+
+            <div class="value">
+
+                <span id="distance">
+                    --
+                </span>
+
+                <span class="unit">
+                    cm
+                </span>
+
+            </div>
+
+        </div>
+
+
+        <!-- IR -->
+
+        <div class="card">
+
+            <div class="icon">
+                🔴
+            </div>
+
+            <div class="label">
+                Infrared Sensor
+            </div>
+
+            <div class="value">
+
+                <span id="infrared">
+                    --
+                </span>
+
+            </div>
+
+        </div>
+
+
+    </div>
+
+
+    <div class="raw">
+
+        <div style="margin-bottom:10px">
+
+            Latest WebSocket Data
+
+        </div>
+
+        <pre id="rawData">
+{}
+        </pre>
+
+    </div>
+
+
+    <div class="last-update">
+
+        Last update:
+        <span id="time">
+            --
+        </span>
+
+    </div>
+
+
+</div>
+
+
+<script>
+
+
+let socket;
+
+let reconnectTimer;
+
+
+function connectWebSocket() {
+
+
+    // Automatically choose ws/wss
+    const protocol =
+        window.location.protocol === "https:"
+            ? "wss"
+            : "ws";
+
+
+    // IMPORTANT:
+    // Use the laptop's IP when opening
+    // the dashboard from another device.
+
+    const host =
+        window.location.hostname ||
+        "127.0.0.1";
+
+
+    const websocketURL =
+        `${protocol}://${host}:8000/ws/sensors`;
+
+
+    console.log(
+        "Connecting to:",
+        websocketURL
+    );
+
+
+    socket =
+        new WebSocket(websocketURL);
+
+
+    // --------------------------------------------------
+    // CONNECTION OPEN
+    // --------------------------------------------------
+
+    socket.onopen = function() {
+
+        console.log(
+            "✅ WebSocket connected"
+        );
+
+
+        const status =
+            document.getElementById(
+                "connection"
+            );
+
+
+        status.textContent =
+            "● Live WebSocket";
+
+
+        status.className =
+            "online";
+
+    };
+
+
+    // --------------------------------------------------
+    // RECEIVE DATA
+    // --------------------------------------------------
+
+    socket.onmessage = function(event) {
+
+        try {
+
+            const data =
+                JSON.parse(event.data);
+
+
+            // Ignore waiting message
+            if (
+                data.status ===
+                "waiting_for_data"
+            ) {
+                return;
+            }
+
+
+            // Distance
+            document.getElementById(
+                "distance"
+            ).textContent =
+                data.distance_cm ?? "--";
+
+
+            // IR sensor
+            document.getElementById(
+                "infrared"
+            ).textContent =
+                data.infrared ?? "--";
+
+
+            // Raw JSON
+            document.getElementById(
+                "rawData"
+            ).textContent =
+                JSON.stringify(
+                    data,
+                    null,
+                    2
+                );
+
+
+            // Timestamp
+            document.getElementById(
+                "time"
+            ).textContent =
+                new Date()
+                    .toLocaleTimeString();
+
+
+        }
+
+        catch (error) {
+
+            console.error(
+                "Invalid WebSocket data:",
+                error
+            );
+
+        }
+
+    };
+
+
+    // --------------------------------------------------
+    // ERROR
+    // --------------------------------------------------
+
+    socket.onerror = function(error) {
+
+        console.error(
+            "WebSocket error:",
+            error
+        );
+
+    };
+
+
+    // --------------------------------------------------
+    // CLOSE
+    // --------------------------------------------------
+
+    socket.onclose = function() {
+
+
+        const status =
+            document.getElementById(
+                "connection"
+            );
+
+
+        status.textContent =
+            "● Disconnected";
+
+
+        status.className =
+            "offline";
+
+
+        console.log(
+            "WebSocket disconnected"
+        );
+
+
+        // Automatically reconnect
+        clearTimeout(
+            reconnectTimer
+        );
+
+
+        reconnectTimer =
+            setTimeout(
+                connectWebSocket,
+                2000
+            );
+
+    };
+
+}
+
+
+connectWebSocket();
+
+
+</script>
+
+
+</body>
+
+</html>
