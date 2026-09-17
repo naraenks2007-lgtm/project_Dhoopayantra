@@ -10,7 +10,7 @@ import {
   Search
 } from 'lucide-react';
 
-export default function BatchAnalytics({ period, setPeriod, batchStats }) {
+export default function BatchAnalytics({ period, batchStats, onOpenReport }) {
   const [searchTerm, setSearchTerm] = useState('');
 
   const currentStats = batchStats[period] || batchStats.day;
@@ -48,22 +48,13 @@ export default function BatchAnalytics({ period, setPeriod, batchStats }) {
             <span style={{ fontSize: '14px' }}>Branches Dried Overview</span>
           </div>
           <div className="period-pills">
-            <button 
-              className={`period-pill-btn ${period === 'day' ? 'active' : ''}`}
-              onClick={() => setPeriod('day')}
-            >
+            <button className="period-pill-btn" onClick={() => onOpenReport('day')}>
               1 Day
             </button>
-            <button 
-              className={`period-pill-btn ${period === 'week' ? 'active' : ''}`}
-              onClick={() => setPeriod('week')}
-            >
+            <button className="period-pill-btn" onClick={() => onOpenReport('week')}>
               1 Week
             </button>
-            <button 
-              className={`period-pill-btn ${period === 'month' ? 'active' : ''}`}
-              onClick={() => setPeriod('month')}
-            >
+            <button className="period-pill-btn" onClick={() => onOpenReport('month')}>
               1 Month
             </button>
           </div>

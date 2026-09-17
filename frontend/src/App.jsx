@@ -4,31 +4,31 @@ import DryingMonitor from './components/DryingMonitor';
 import AIPredictions from './components/AIPredictions';
 import BatchAnalytics from './components/BatchAnalytics';
 import AlertsPackaging from './components/AlertsPackaging';
+import BranchesReport from './components/BranchesReport';
 import Navbar from './components/Navbar';
 import { 
-  Wifi, 
-  WifiOff, 
-  Smartphone, 
-  Monitor, 
   Play, 
   Pause, 
-  Download,
-  Sparkles,
-  BatteryCharging
+  Download
 } from 'lucide-react';
 
 export default function App() {
   const [activeScreen, setActiveScreen] = useState('home');
-  const [isExpanded, setIsExpanded] = useState(false);
   const [isSimulating, setIsSimulating] = useState(false);
   const [period, setPeriod] = useState('day');
+  const [reportReturnScreen, setReportReturnScreen] = useState('home');
+
+  const openBranchesReport = (nextPeriod, fromScreen = 'home') => {
+    setPeriod(nextPeriod);
+    setReportReturnScreen(fromScreen);
+    setActiveScreen('report');
+  };
 
   // WebSocket Status
   const [wsStatus, setWsStatus] = useState('connecting'); // 'online' | 'connecting' | 'offline'
 
   // Live MQTT tracking state
   const [hasLiveMqtt, setHasLiveMqtt] = useState(false);
-  const [mqttPacketCount, setMqttPacketCount] = useState(0);
   const [lastMqttTime, setLastMqttTime] = useState(null);
   const [rawMqtt, setRawMqtt] = useState(null);
 
@@ -73,6 +73,9 @@ export default function App() {
       branches: 360,
       batches: 18,
       growth: 12,
+      daysInRange: 1,
+      startTime: '08 Sep 2026, 06:00 AM',
+      endTime: '08 Sep 2026, 09:44 AM',
       history: [
         { label: '9AM', branches: 60, percentage: 40 },
         { label: '11AM', branches: 80, percentage: 65 },
@@ -86,6 +89,9 @@ export default function App() {
       branches: 2240,
       batches: 112,
       growth: 18,
+      daysInRange: 7,
+      startTime: '02 Sep 2026, 06:00 AM',
+      endTime: '08 Sep 2026, 09:44 AM',
       history: [
         { label: 'Mon', branches: 320, percentage: 70 },
         { label: 'Tue', branches: 340, percentage: 75 },
@@ -101,6 +107,9 @@ export default function App() {
       branches: 9600,
       batches: 480,
       growth: 24,
+      daysInRange: 30,
+      startTime: '10 Aug 2026, 06:00 AM',
+      endTime: '08 Sep 2026, 09:44 AM',
       history: [
         { label: 'W1', branches: 2100, percentage: 65 },
         { label: 'W2', branches: 2350, percentage: 75 },
@@ -138,7 +147,6 @@ export default function App() {
     }
 
     setHasLiveMqtt(true);
-    setMqttPacketCount(c => c + 1);
     setLastMqttTime(new Date().toLocaleTimeString());
     setRawMqtt(data);
     setWsStatus('online');
@@ -246,18 +254,6 @@ export default function App() {
     };
   }, [isSimulating]);
 
-  // Publish Test MQTT Packet via WebSocket
-  const handlePublishTestPacket = () => {
-    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-      console.log('🚀 Sending publish_sample command to main.py over WebSocket...');
-      socketRef.current.send(JSON.stringify({ action: "publish_sample" }));
-    } else {
-      console.warn('WebSocket not open. Falling back to HTTP trigger...');
-      const host = window.location.hostname || '127.0.0.1';
-      fetch(`http://${host}:8000/api/mqtt/publish-sample`, { method: 'POST' }).catch(() => {});
-    }
-  };
-
   // PWA Install Prompt
   useEffect(() => {
     const handleBeforeInstall = (e) => {
@@ -303,15 +299,16 @@ export default function App() {
     return () => clearInterval(interval);
   }, [isSimulating, sensorData.temperature, sensorData.humidity]);
 
+  const showNav = activeScreen !== 'report';
+
   return (
     <div className="app-viewport">
-      {/* Top Controls on Desktop */}
-      <header className={`top-bar-controls ${isExpanded ? 'expanded-mode' : ''}`}>
+      <header className="top-bar-controls">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontWeight: '700', color: 'var(--primary)', letterSpacing: '0.5px' }}>
             🌿 AromaAI
           </span>
-          <span style={{ fontSize: '11px', color: '#828f87' }}>WebSocket PWA</span>
+          <span style={{ fontSize: '11px', color: '#828f87' }}>Smart Drying</span>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -323,51 +320,10 @@ export default function App() {
             {isSimulating ? <Pause size={13} /> : <Play size={13} />}
             <span>{isSimulating ? 'Simulating' : 'Simulate IoT'}</span>
           </button>
-
-          <button
-            className="mode-toggle-btn"
-            onClick={() => setIsExpanded(!isExpanded)}
-            title="Toggle between Mobile Phone Frame and Full Width"
-          >
-            {isExpanded ? <Smartphone size={14} /> : <Monitor size={14} />}
-            <span>{isExpanded ? 'Mobile View' : 'Expanded View'}</span>
-          </button>
         </div>
       </header>
 
-      {/* Main Container Shell */}
-      <div className={`device-shell ${isExpanded ? 'expanded' : ''}`}>
-        {!isExpanded && (
-          <div className="device-notch">
-            <div className="device-notch-sensor"></div>
-            <div className="device-notch-camera"></div>
-          </div>
-        )}
-
-        {/* System Bar */}
-        <div className="system-status-bar">
-          <span>09:44 AM</span>
-
-          {/* WebSocket Status Indicator */}
-          <div className="system-status-icons">
-            <span className={`ws-status-pill ${wsStatus === 'online' ? 'online' : 'offline'}`}>
-              {wsStatus === 'online' ? (
-                <>
-                  <Wifi size={12} />
-                  <span>{hasLiveMqtt ? 'Live WebSocket' : 'WebSocket Connected'}</span>
-                </>
-              ) : (
-                <>
-                  <WifiOff size={12} />
-                  <span>Backend Offline (Run main.py)</span>
-                </>
-              )}
-            </span>
-            <BatteryCharging size={15} color="var(--primary)" />
-          </div>
-        </div>
-
-        {/* Scrollable Content Container */}
+      <div className={`app-shell ${showNav ? '' : 'report-mode'}`}>
         <main className="main-scroll-content">
           {showInstallBanner && (
             <div className="pwa-install-banner">
@@ -384,13 +340,9 @@ export default function App() {
             <HomeDashboard
               sensorData={sensorData}
               period={period}
-              setPeriod={setPeriod}
               batchStats={batchStats}
-              rawMqtt={rawMqtt}
-              mqttPacketCount={mqttPacketCount}
-              lastMqttTime={lastMqttTime}
               hasLiveMqtt={hasLiveMqtt}
-              onPublishTestPacket={handlePublishTestPacket}
+              onOpenReport={(nextPeriod) => openBranchesReport(nextPeriod, 'home')}
               onNavigateToMonitor={() => setActiveScreen('monitor')}
               onStartPackaging={() => setActiveScreen('alerts')}
             />
@@ -415,8 +367,16 @@ export default function App() {
           {activeScreen === 'batches' && (
             <BatchAnalytics
               period={period}
-              setPeriod={setPeriod}
               batchStats={batchStats}
+              onOpenReport={(nextPeriod) => openBranchesReport(nextPeriod, 'batches')}
+            />
+          )}
+
+          {activeScreen === 'report' && (
+            <BranchesReport
+              period={period}
+              batchStats={batchStats}
+              onBack={() => setActiveScreen(reportReturnScreen)}
             />
           )}
 
@@ -428,12 +388,13 @@ export default function App() {
           )}
         </main>
 
-        {/* Bottom Floating Navigation Bar */}
-        <Navbar
-          activeScreen={activeScreen}
-          setActiveScreen={setActiveScreen}
-          onQuickAction={() => setActiveScreen('batches')}
-        />
+        {showNav && (
+          <Navbar
+            activeScreen={activeScreen}
+            setActiveScreen={setActiveScreen}
+            onQuickAction={() => setActiveScreen('batches')}
+          />
+        )}
       </div>
     </div>
   );

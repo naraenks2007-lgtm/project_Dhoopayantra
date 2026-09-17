@@ -46,7 +46,7 @@
 
 body {
   font-family: var(--font-family);
-  background: #ede8df;
+  background: var(--bg-app);
   color: var(--text-main);
   min-height: 100vh;
   margin: 0;
@@ -55,51 +55,25 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Base App Wrapper (Desktop center frame or full screen) */
 .app-viewport {
   min-height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: flex-start;
-  padding: 0;
-  background: linear-gradient(135deg, #dfd8cb 0%, #ede8df 100%);
+  align-items: stretch;
+  background: var(--bg-app);
 }
 
 .top-bar-controls {
   width: 100%;
-  max-width: 440px;
+  max-width: 1120px;
+  margin: 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 14px;
+  padding: 12px 20px 8px;
   font-size: 13px;
   color: #55635a;
-}
-
-.top-bar-controls.expanded-mode {
-  max-width: 1200px;
-}
-
-.mode-toggle-btn {
-  background: white;
-  border: 1px solid var(--border-color);
-  padding: 5px 12px;
-  border-radius: var(--radius-full);
-  font-family: var(--font-family);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--primary);
-  cursor: pointer;
-  box-shadow: var(--shadow-sm);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-}
-
-.mode-toggle-btn:hover {
-  background: var(--primary-subtle);
 }
 
 .sim-toggle-btn {
@@ -124,101 +98,27 @@ body {
   border-color: var(--accent-orange);
 }
 
-/* Device Shell (Mockup frame for Desktop & Native edge-to-edge for Mobile) */
-.device-shell {
+.app-shell {
   width: 100%;
-  max-width: 420px;
-  min-height: 100vh;
+  max-width: 1120px;
+  margin: 0 auto;
+  min-height: 0;
+  flex: 1;
   background: var(--bg-app);
   display: flex;
   flex-direction: column;
   position: relative;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-  transition: max-width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.device-shell.expanded {
-  max-width: 1200px;
-  border-radius: 20px;
-  min-height: 92vh;
-  margin-bottom: 24px;
+.app-shell.report-mode .main-scroll-content {
+  padding-bottom: 24px;
 }
 
-@media (min-width: 480px) {
-  .device-shell:not(.expanded) {
-    min-height: 890px;
-    height: 92vh;
-    border-radius: 44px;
-    border: 10px solid #1e2a23;
-    margin: 6px 0 20px 0;
-  }
-}
-
-@media (max-width: 479px) {
-  .top-bar-controls {
-    display: none;
-  }
-  .device-shell {
-    max-width: 100% !important;
-    min-height: 100vh !important;
-    border-radius: 0 !important;
-    border: none !important;
-    box-shadow: none !important;
-    margin: 0 !important;
-  }
-}
-
-/* Device Status Notch (iPhone Island style) */
-.device-notch {
-  width: 120px;
-  height: 24px;
-  background: #1e2a23;
-  border-radius: 0 0 16px 16px;
-  margin: 0 auto 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.device-notch-camera {
-  width: 8px;
-  height: 8px;
-  background: #0f1612;
-  border-radius: 50%;
-}
-
-.device-notch-sensor {
-  width: 30px;
-  height: 4px;
-  background: #15201a;
-  border-radius: 2px;
-}
-
-/* Top System Status Bar */
-.system-status-bar {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 8px 18px 4px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-main);
-  user-select: none;
-}
-
-.system-status-icons {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Scrollable Main Content */
 .main-scroll-content {
   flex: 1;
   overflow-y: auto;
-  padding: 10px 18px 90px;
+  padding: 10px 20px 24px;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -346,10 +246,6 @@ body {
   grid-template-columns: repeat(2, 1fr);
   gap: 12px;
   margin-bottom: 16px;
-}
-
-.device-shell.expanded .primary-metrics-grid {
-  grid-template-columns: repeat(4, 1fr);
 }
 
 .metric-card {
@@ -750,8 +646,8 @@ body {
 
 /* Bottom Floating Navigation Bar */
 .bottom-nav-bar {
-  position: absolute;
-  bottom: 0;
+  position: relative;
+  bottom: auto;
   left: 0;
   right: 0;
   background: var(--bg-card);
@@ -761,6 +657,7 @@ body {
   justify-content: space-around;
   padding: 8px 12px 14px;
   z-index: 50;
+  flex-shrink: 0;
   box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.04);
 }
 
@@ -802,7 +699,7 @@ body {
   border: none;
   cursor: pointer;
   box-shadow: 0 4px 14px rgba(30, 94, 58, 0.35);
-  margin-top: -20px;
+  margin-top: 0;
   transition: transform 0.2s ease, background 0.2s ease;
 }
 
@@ -1032,4 +929,144 @@ body {
 .ws-status-pill.offline {
   background: #fde8e8;
   color: #c53030;
+}
+
+.branches-report-view {
+  max-width: 920px;
+  margin: 0 auto;
+}
+
+.report-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.report-back-btn {
+  background: white;
+  border: 1px solid var(--border-color);
+  padding: 8px 14px;
+  border-radius: var(--radius-full);
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--primary);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.report-pdf-btn {
+  width: auto;
+  padding: 10px 16px;
+  margin: 0;
+}
+
+.report-hero {
+  margin-bottom: 20px;
+}
+
+.report-kicker {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--primary);
+}
+
+.report-hero h2 {
+  font-size: 26px;
+  font-weight: 700;
+  margin-top: 4px;
+}
+
+.report-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.report-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.report-metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-time-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  line-height: 1.35;
+}
+
+@media (min-width: 768px) {
+  .primary-metrics-grid,
+  .report-metrics-grid,
+  .gauges-card-row {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .gauges-card-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .artisan-header .greeting-text h2 {
+    font-size: 26px;
+  }
+}
+
+@media (max-width: 640px) {
+  .top-bar-controls {
+    padding: 10px 14px 6px;
+  }
+
+  .main-scroll-content {
+    padding: 8px 14px 20px;
+  }
+
+  .sensor-strip-card {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .branches-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .report-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-pdf-btn {
+    width: 100%;
+  }
+}
+
+@media print {
+  .top-bar-controls,
+  .bottom-nav-bar,
+  .no-print {
+    display: none !important;
+  }
+
+  .main-scroll-content {
+    padding: 0;
+    overflow: visible;
+  }
 }
