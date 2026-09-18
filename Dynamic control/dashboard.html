@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AromaAI - ESP32 Live Dashboard</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,Helvetica,sans-serif;background:#f4f7fb;color:#1f2937}
+.container{width:min(1100px,92%);margin:40px auto}
+.header,.card,.footer{background:#fff;border-radius:18px;box-shadow:0 8px 24px rgba(0,0,0,.07)}
+.header{padding:24px;margin-bottom:20px}
+h1{font-size:28px;margin-bottom:8px}
+.sub{color:#6b7280}
+.status{margin-top:16px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.status-left{display:flex;align-items:center;gap:8px;font-weight:700}
+.dot{width:11px;height:11px;border-radius:50%;background:#dc2626}
+.dot.connected{background:#16a34a}
+.topic{font-size:14px;color:#6b7280}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
+.card{padding:22px}
+.label{font-size:14px;color:#6b7280;margin-bottom:12px}
+.value{font-size:30px;font-weight:800}
+.prediction{display:inline-block;padding:9px 16px;border-radius:999px;font-size:18px;font-weight:800;text-transform:uppercase}
+.open{background:#dcfce7;color:#166534}
+.close{background:#fee2e2;color:#991b1b}
+.footer{margin-top:18px;padding:18px 22px;color:#6b7280}
+@media(max-width:850px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.grid{grid-template-columns:1fr}.container{margin:20px auto}}
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+    <h1>AromaAI ESP32 Live Dashboard</h1>
+    <div class="sub">Live data from ESP32 via MQTT → FastAPI → WebSocket</div>
+
+    <div class="status">
+        <div class="status-left">
+            <span id="dot" class="dot"></span>
+            <span id="connectionText">Connecting...</span>
+        </div>
+        <div class="topic">Topic: <strong>esp32/sensor_data</strong> | QoS: 0</div>
+    </div>
+</div>
+
+<div class="grid">
+
+    <div class="card">
+        <div class="label">IR Detection</div>
+        <div id="ir" class="value">--</div>
+    </div>
+
+    <div class="card">
+        <div class="label">Ultrasonic Distance</div>
+        <div class="value"><span id="distance">--</span> cm</div>
+    </div>
+
+    <div class="card">
+        <div class="label">ML Prediction</div>
+        <div id="prediction" class="prediction">--</div>
+    </div>
+
+    <div class="card">
+        <div class="label">Servo Angle</div>
+        <div class="value"><span id="servo">--</span>°</div>
+    </div>
+
+</div>
+
+<div class="footer">
+    Last update: <strong id="lastUpdate">--</strong>
+</div>
+
+</div>
+
+<script>
+let ws;
+
+function setConnection(connected, message) {
+    document.getElementById("dot").className =
+        connected ? "dot connected" : "dot";
+    document.getElementById("connectionText").textContent = message;
+}
+
+function updateDashboard(data) {
+    if (!data || typeof data !== "object") return;
+
+    if (data.ir_detected !== undefined && data.ir_detected !== null) {
+        document.getElementById("ir").textContent =
+            Number(data.ir_detected) === 1
+                ? "DETECTED"
+                : "NOT DETECTED";
+    }
+
+    if (data.ultrasonic_distance_cm !== undefined &&
+        data.ultrasonic_distance_cm !== null) {
+        document.getElementById("distance").textContent =
+            Number(data.ultrasonic_distance_cm).toFixed(2);
+    }
+
+    if (data.prediction !== undefined && data.prediction !== null) {
+        const p = String(data.prediction).toLowerCase();
+        const el = document.getElementById("prediction");
+
+        el.textContent = p;
+        el.className =
+            p === "open" || p === "close"
+                ? "prediction " + p
+                : "prediction";
+    }
+
+    if (data.servo_angle_deg !== undefined &&
+        data.servo_angle_deg !== null) {
+        document.getElementById("servo").textContent =
+            Number(data.servo_angle_deg);
+    }
+
+    document.getElementById("lastUpdate").textContent =
+        new Date().toLocaleTimeString();
+}
+
+function connect() {
+    const protocol =
+        location.protocol === "https:" ? "wss:" : "ws:";
+
+    ws = new WebSocket(
+        protocol + "//" + location.host + "/ws/sensors"
+    );
+
+    ws.onopen = () => {
+        setConnection(true, "Backend connected");
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            console.log("Live data:", data);
+
+            if (data.status !== "waiting_for_data") {
+                updateDashboard(data);
+            }
+        } catch (err) {
+            console.error("Invalid WebSocket data:", err);
+        }
+    };
+
+    ws.onclose = () => {
+        setConnection(false, "Disconnected - retrying...");
+        setTimeout(connect, 3000);
+    };
+
+    ws.onerror = () => {
+        setConnection(false, "Connection error");
+    };
+}
+
+connect();
+</script>
+</body>
+</html>
